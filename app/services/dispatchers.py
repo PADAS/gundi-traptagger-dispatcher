@@ -41,6 +41,9 @@ class TrapTaggerImageDispatcher:
             f"{parsed_url.scheme}://{parsed_url.hostname}/api/v1/addImage"
         )
         try:
+            logger.debug(
+                f"Posting to TrapTagger endpoint {sanitized_endpoint} with data {request_data}..."
+            )
             connect_timeout, read_timeout = settings.DEFAULT_REQUESTS_TIMEOUT
             timeout_settings = httpx.Timeout(read_timeout, connect=connect_timeout)
             async with httpx.AsyncClient(timeout=timeout_settings) as client:
