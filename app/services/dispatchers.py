@@ -35,7 +35,7 @@ class TrapTaggerImageDispatcher:
                 f"Token for integration {str(self.integration.id)} is missing. Please fix the integration setup in the portal."
             )
         headers = {"apikey": api_key}
-        files = {"Attachment1": (file_name, file_data)}
+        files = {"image": (file_name, file_data)}
         parsed_url = urlparse(self.integration.base_url)
         sanitized_endpoint = (
             f"{parsed_url.scheme}://{parsed_url.hostname}/api/v1/addImage"
