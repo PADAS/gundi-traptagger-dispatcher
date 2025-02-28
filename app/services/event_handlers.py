@@ -163,7 +163,7 @@ async def dispatch_image(
             dispatched_observation = gundi_schemas_v2.DispatchedObservation(
                 gundi_id=gundi_id,
                 related_to=related_to,
-                external_id=gundi_id,  # ID in the destination system
+                external_id=result.get("image_id"),  # ID in the destination system
                 data_provider_id=data_provider_id,
                 destination_id=destination_id,
                 delivered_at=datetime.now(timezone.utc),  # UTC

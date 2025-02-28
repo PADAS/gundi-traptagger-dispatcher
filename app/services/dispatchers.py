@@ -56,7 +56,7 @@ class TrapTaggerImageDispatcher:
                 f"Error occurred posting to TrapTagger endpoint {sanitized_endpoint} \n {type(e).__name__}: {e}"
             )
             raise e  # Raise so it's retried
-        return response
+        return response.json()
 
     async def send(self, image: schemas.v2.TrapTaggerImage, **kwargs):
         related_event = kwargs.get("related_event")
