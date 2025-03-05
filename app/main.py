@@ -19,8 +19,7 @@ root_path = os.environ.get("ROOT_PATH", "")
 async def lifespan(app: FastAPI):
     # Startup Hook
     yield
-    # Shotdown Hook
-    await gundi.portal_client.close()
+    # Shutdown Hook
     await utils.redis_client.close()
     await dispatchers.gcp_storage.close()
 
