@@ -1,6 +1,7 @@
 import logging
 import backoff
 import httpx
+import traceback
 from datetime import datetime, timezone
 from redis import exceptions as redis_exceptions
 from gundi_core.events.transformers import (
@@ -131,19 +132,34 @@ async def dispatch_image(
                 "traptagger_dispatcher.error_dispatching_observation",
                 kind=SpanKind.CLIENT,
             ) as error_span:
-                error_msg = f"Error dispatching observation {gundi_id} to destination {destination_id}: {type(e)}: {e}"
+                error_msg = f"Error dispatching observation {gundi_id} to destination {destination_id}: {type(e).__name__}: {e}"
                 logger.exception(error_msg)
                 error_span.set_attribute("error", error_msg)
+                # Extract additional response details if available
+                if (
+                    response := getattr(e, "response", None)
+                ) is not None:  # bool(response) on status errors returns False
+                    server_response_status = (getattr(response, "status_code", None),)
+                    server_response_body = str(
+                        getattr(response, "text", getattr(response, "content", None))
+                        or ""
+                    )
                 # Emit events for the portal and other interested services (EDA)
                 await publish_event(
                     event=system_events.ObservationDeliveryFailed(
-                        payload=gundi_schemas_v2.DispatchedObservation(
-                            gundi_id=gundi_id,
-                            related_to=related_to,
-                            external_id=gundi_id,  # ID in the destination system
-                            data_provider_id=data_provider_id,
-                            destination_id=destination_id,
-                            delivered_at=datetime.now(timezone.utc),  # UTC
+                        payload=system_events.DeliveryErrorDetails(
+                            error=error_msg,
+                            error_traceback=traceback.format_exc(),
+                            server_response_status=server_response_status,
+                            server_response_body=server_response_body,
+                            observation=gundi_schemas_v2.DispatchedObservation(
+                                gundi_id=gundi_id,
+                                related_to=related_to,
+                                external_id=None,
+                                data_provider_id=data_provider_id,
+                                destination_id=destination_id,
+                                delivered_at=datetime.now(timezone.utc),  # UTC
+                            ),
                         )
                     ),
                     topic_name=settings.DISPATCHER_EVENTS_TOPIC,
@@ -192,16 +208,31 @@ async def handle_traptagger_event(event: EventTransformedTrapTagger, attributes:
                 data=event.payload, gundi_id=gundi_id, destination_id=destination_id
             )
         except Exception as e:
-            logger.error(f"Error caching image metadata: {type(e)}: {e}")
+            error_msg = f"Error caching image metadata for {gundi_id} and {destination_id}: {type(e).__name__}: {e}"
+            logger.exception(error_msg)
+            # Extract additional response details if available
+            if (
+                response := getattr(e, "response", None)
+            ) is not None:  # bool(response) on status errors returns False
+                server_response_status = (getattr(response, "status_code", None),)
+                server_response_body = str(
+                    getattr(response, "text", getattr(response, "content", None)) or ""
+                )
             await publish_event(
                 event=system_events.ObservationDeliveryFailed(
-                    payload=gundi_schemas_v2.DispatchedObservation(
-                        gundi_id=gundi_id,
-                        related_to=related_to,
-                        external_id=gundi_id,  # ID in the destination system
-                        data_provider_id=data_provider_id,
-                        destination_id=destination_id,
-                        delivered_at=datetime.now(timezone.utc),  # UTC
+                    payload=system_events.DeliveryErrorDetails(
+                        error=error_msg,
+                        error_traceback=traceback.format_exc(),
+                        server_response_status=server_response_status,
+                        server_response_body=server_response_body,
+                        observation=gundi_schemas_v2.DispatchedObservation(
+                            gundi_id=gundi_id,
+                            related_to=related_to,
+                            external_id=None,
+                            data_provider_id=data_provider_id,
+                            destination_id=destination_id,
+                            delivered_at=datetime.now(timezone.utc),  # UTC
+                        ),
                     )
                 ),
                 topic_name=settings.DISPATCHER_EVENTS_TOPIC,
