@@ -1,9 +1,10 @@
 import datetime
 import json
-
+import httpx
 import pytest
 import asyncio
 import gundi_core.schemas.v2 as schemas_v2
+import gundi_core.events as system_events
 from gcloud.aio import pubsub
 from app.core import settings
 
@@ -86,6 +87,11 @@ def mock_pubsub_client(
     mock_client.PublisherClient.return_value = mock_publisher
     mock_client.PubsubMessage.return_value = observation_delivered_pubsub_message
     return mock_client
+
+
+@pytest.fixture
+def mock_publish_event(mocker):
+    return mocker.AsyncMock()
 
 
 @pytest.fixture
@@ -291,5 +297,120 @@ def attachment_v2_as_pubsub_request(mocker):
 
 
 @pytest.fixture
-def trap_tagger_api_success_response():
+def event_v2_transformed_traptagger():
+    return system_events.EventTransformedTrapTagger.parse_obj(
+        {
+            "event_id": "efc50ef6-2e63-41ee-868b-e03b2058ee54",
+            "timestamp": "2025-03-05 12:18:54.552224+00:00",
+            "schema_version": "v1",
+            "payload": {
+                "camera": "gundicam-test",
+                "latitude": "-27.10443",
+                "longitude": "-108.23966",
+                "timestamp": "2025-03-05 12:18:30",
+            },
+            "event_type": "EventTransformedTrapTagger",
+        }
+    )
+
+
+@pytest.fixture
+def attachment_v2_transformed_traptagger():
+    return system_events.AttachmentTransformedTrapTagger.parse_obj(
+        {
+            "event_id": "c2bcc65e-81c9-4e22-9aad-47b0f2408f01",
+            "timestamp": "2025-03-05 12:20:22.700737+00:00",
+            "schema_version": "v1",
+            "payload": {
+                "file_path": "attachments/259a2767-d7a0-462e-a881-57bf746f53d1_elephant_single_20250305.jpg"
+            },
+            "event_type": "AttachmentTransformedTrapTagger",
+        }
+    )
+
+
+@pytest.fixture
+def attachment_v2_transformed_traptagger_attributes():
+    return {
+        "annotations": {},
+        "data_provider_id": "b976ac0e-135a-4212-88b7-7bfc58e897a2",
+        "destination_id": "a16f0110-bf40-4518-9c68-9018c6ec8f6d",
+        "external_source_id": None,
+        "gundi_id": "259a2767-d7a0-462e-a881-57bf746f53d1",
+        "gundi_version": "v2",
+        "provider_key": "gundi_wps_watch_r_b976ac0e-135a-4212-88b7-7bfc58e897a2",
+        "related_to": "56a5afe0-7829-47d1-a496-80dcbf816593",
+        "source_id": None,
+        "stream_type": "att",
+        "tracing_context": "{}",
+    }
+
+
+@pytest.fixture
+def mock_trap_tagger_api_response_image_added():
     return {"image_id": 194376426, "message": "Image added successfully."}
+
+
+@pytest.fixture
+def mock_trap_tagger_api_response_image_exists():
+    return {"message": "Image already exists.", "image_id": 194376426}
+
+
+@pytest.fixture
+def mock_traptagger_successful_response(
+    request,
+    mock_trap_tagger_api_response_image_added,
+    mock_trap_tagger_api_response_image_exists,
+):
+    if request.param == "image_added":
+        return httpx.Response(
+            status_code=200,
+            content=json.dumps(mock_trap_tagger_api_response_image_added).encode(),
+            request=httpx.Request(
+                "POST", "https://test.traptagger.com/api/v1/addImage"
+            ),
+        )
+    else:
+        return httpx.Response(
+            status_code=200,
+            content=json.dumps(mock_trap_tagger_api_response_image_exists).encode(),
+            request=httpx.Request(
+                "POST", "https://test.traptagger.com/api/v1/addImage"
+            ),
+        )
+
+
+@pytest.fixture
+def mock_traptagger_error_response(request):
+    if request.param == "bad_credentials":
+        return httpx.Response(
+            status_code=401,
+            content=b'{"message": "Unauthorized access."}',
+            request=httpx.Request(
+                "POST", "https://test.traptagger.com/api/v1/addImage"
+            ),
+        )
+    elif request.param == "bad_request":
+        return httpx.Response(
+            status_code=400,
+            content=b'{"message": "No image provided."}',
+            request=httpx.Request(
+                "POST", "https://test.traptagger.com/api/v1/addImage"
+            ),
+        )
+    elif request.param == "service_unavailable":
+        return httpx.Response(
+            status_code=503,
+            content=b'{"message": "Service unavailable."}',
+            request=httpx.Request(
+                "POST", "https://test.traptagger.com/api/v1/addImage"
+            ),
+        )
+    else:  # internal_error
+        return httpx.Response(
+            status_code=500,
+            content=b'{"message": "Internal server error."}',
+            request=httpx.Request(
+                "POST", "https://test.traptagger.com/api/v1/addImage"
+            ),
+        )

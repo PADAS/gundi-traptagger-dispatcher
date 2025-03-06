@@ -18,7 +18,7 @@ async def test_process_event_v2_successfully(
     mock_pubsub_client,
     event_v2_as_pubsub_request,
     destination_integration_v2_traptagger,
-    trap_tagger_api_success_response,
+    mock_trap_tagger_api_response_image_added,
 ):
 
     # Mock external dependencies
@@ -37,7 +37,7 @@ async def test_process_event_v2_successfully(
         # Mock the TrapTagger API response
         route = respx_mock.post(f"api/v1/addImage", name="upload_file").respond(
             httpx.codes.OK,
-            json=trap_tagger_api_success_response,
+            json=mock_trap_tagger_api_response_image_added,
         )
         from app.main import app
 
@@ -79,7 +79,7 @@ async def test_process_attachment_v2_successfully(
     attachment_v2_as_pubsub_request,
     attachment_file_blob,
     destination_integration_v2_traptagger,
-    trap_tagger_api_success_response,
+    mock_trap_tagger_api_response_image_added,
 ):
     # Mock external dependencies
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
@@ -128,7 +128,7 @@ async def test_process_attachment_v2_successfully(
             files=expected_files,
         ).respond(
             httpx.codes.OK,
-            json=trap_tagger_api_success_response,
+            json=mock_trap_tagger_api_response_image_added,
         )
         from app.main import app
 
