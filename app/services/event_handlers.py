@@ -139,7 +139,7 @@ async def dispatch_image(
                 if (
                     response := getattr(e, "response", None)
                 ) is not None:  # bool(response) on status errors returns False
-                    server_response_status = (getattr(response, "status_code", None),)
+                    server_response_status = getattr(response, "status_code", None)
                     server_response_body = str(
                         getattr(response, "text", getattr(response, "content", None))
                         or ""
@@ -217,7 +217,7 @@ async def handle_traptagger_event(event: EventTransformedTrapTagger, attributes:
             if (
                 response := getattr(e, "response", None)
             ) is not None:  # bool(response) on status errors returns False
-                server_response_status = (getattr(response, "status_code", None),)
+                server_response_status = getattr(response, "status_code", None)
                 server_response_body = str(
                     getattr(response, "text", getattr(response, "content", None)) or ""
                 )
