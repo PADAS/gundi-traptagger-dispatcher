@@ -180,6 +180,7 @@ async def dispatch_image(
             )
             # Emit events for the portal and other interested services (EDA)
             traptagger_image_id = result.get("image_id")
+            current_span.set_attribute("external_id", str(traptagger_image_id))
             dispatched_observation = gundi_schemas_v2.DispatchedObservation(
                 gundi_id=gundi_id,
                 related_to=related_to,
