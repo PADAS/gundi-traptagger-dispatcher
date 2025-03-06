@@ -144,6 +144,9 @@ async def dispatch_image(
                         getattr(response, "text", getattr(response, "content", None))
                         or ""
                     )
+                    logger.debug(
+                        f"Server response: status: {server_response_status}, body: {server_response_body}"
+                    )
                 # Emit events for the portal and other interested services (EDA)
                 await publish_event(
                     event=system_events.ObservationDeliveryFailed(
@@ -217,6 +220,9 @@ async def handle_traptagger_event(event: EventTransformedTrapTagger, attributes:
                 server_response_status = (getattr(response, "status_code", None),)
                 server_response_body = str(
                     getattr(response, "text", getattr(response, "content", None)) or ""
+                )
+                logger.debug(
+                    f"Server response: status: {server_response_status}, body: {server_response_body}"
                 )
             await publish_event(
                 event=system_events.ObservationDeliveryFailed(
