@@ -81,7 +81,7 @@ async def process_transformer_event_v2(raw_event, attributes):
         )
         current_span.set_attribute("transformed_message", str(raw_event))
         current_span.set_attribute("environment", settings.TRACE_ENVIRONMENT)
-        current_span.set_attribute("service", "er-dispatcher")
+        current_span.set_attribute("service", "tt-dispatcher")
         logger.debug(
             f"Message received: \npayload: {raw_event} \nattributes: {attributes}"
         )
