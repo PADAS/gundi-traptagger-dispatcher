@@ -10,6 +10,6 @@ jobs:
     uses: PADAS/gundi-workflows/.github/workflows/pipeline-dispatcher-docker-release.yml@main
     secrets: inherit
     with:
-      secret_name: "tt-dispatcher-defaults-dev"
+      secret_name: "tt-dispatcher-defaults"
       stage_environment: stage
       prod_environment: prod
