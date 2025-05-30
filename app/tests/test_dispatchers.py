@@ -1,5 +1,4 @@
 import respx
-import httpx
 import pytest
 from gundi_core.events import dispatchers as dispatcher_events
 from app.core import settings
@@ -25,13 +24,13 @@ async def test_dispatch_image_successfully(
     attachment_v2_transformed_traptagger_attributes,
     destination_integration_v2_traptagger,
 ):
-    from app.services.event_handlers import dispatch_image
-
     # Mock external dependencies
     mocker.patch("app.core.utils.redis_client", mock_redis)
     mocker.patch("app.services.event_handlers.publish_event", mock_publish_event)
     mocker.patch("app.services.dispatchers.redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
+
+    from app.services.event_handlers import dispatch_image
 
     # Mock TrapTagger API response
     async with respx.mock(
@@ -86,13 +85,14 @@ async def test_dispatch_image_on_errors(
     attachment_v2_transformed_traptagger_attributes,
     destination_integration_v2_traptagger,
 ):
-    from app.services.event_handlers import dispatch_image
 
     # Mock external dependencies
     mocker.patch("app.core.utils.redis_client", mock_redis)
     mocker.patch("app.services.event_handlers.publish_event", mock_publish_event)
     mocker.patch("app.services.dispatchers.redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
+
+    from app.services.event_handlers import dispatch_image
 
     # Mock TrapTagger API response
     async with respx.mock(
