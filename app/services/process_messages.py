@@ -10,7 +10,6 @@ from app.core.utils import (
 )
 
 from app.core import tracing
-from . import dispatchers
 from .event_handlers import event_handlers, event_schemas
 
 
