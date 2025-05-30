@@ -22,6 +22,7 @@ async def test_process_event_v2_successfully(
 ):
 
     # Mock external dependencies
+    mocker.patch("app.services.dispatchers.Storage")
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)
@@ -82,6 +83,7 @@ async def test_process_attachment_v2_successfully(
     mock_trap_tagger_api_response_image_added,
 ):
     # Mock external dependencies
+    mocker.patch("app.services.dispatchers.Storage")
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)

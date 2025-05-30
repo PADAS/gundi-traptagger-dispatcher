@@ -25,6 +25,7 @@ async def test_dispatch_image_successfully(
     destination_integration_v2_traptagger,
 ):
     # Mock external dependencies
+    mocker.patch("app.services.dispatchers.Storage")
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.core.utils.redis_client", mock_redis)
     mocker.patch("app.services.event_handlers.publish_event", mock_publish_event)
@@ -87,6 +88,7 @@ async def test_dispatch_image_on_errors(
 ):
 
     # Mock external dependencies
+    mocker.patch("app.services.dispatchers.Storage")
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.core.utils.redis_client", mock_redis)
     mocker.patch("app.services.event_handlers.publish_event", mock_publish_event)
