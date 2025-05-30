@@ -22,12 +22,13 @@ async def test_process_event_v2_successfully(
 ):
 
     # Mock external dependencies
+    mocker.patch("app.services.dispatchers.Storage")
+    mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)
     mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
     mocker.patch("app.services.event_handlers._cache_db", mock_redis)
     mocker.patch("app.services.dispatchers.redis_client", mock_redis)
-    mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
     async with respx.mock(
         base_url=destination_integration_v2_traptagger.base_url,
@@ -82,12 +83,13 @@ async def test_process_attachment_v2_successfully(
     mock_trap_tagger_api_response_image_added,
 ):
     # Mock external dependencies
+    mocker.patch("app.services.dispatchers.Storage")
+    mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)
     mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
     mocker.patch("app.services.event_handlers._cache_db", mock_redis_with_cached_event)
     mocker.patch("app.services.dispatchers.redis_client", mock_redis)
-    mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
     # Mock the TrapTagger API
     async with respx.mock(
