@@ -1,5 +1,7 @@
 import mimetypes
 import os
+from unittest.mock import AsyncMock
+
 import httpx
 import logging
 from app.core import settings
@@ -11,7 +13,10 @@ from app.core.utils import RateLimiterSemaphore, redis_client, find_config_for_a
 
 logger = logging.getLogger(__name__)
 
-gcp_storage = Storage()
+if settings.GCP_ENVIRONMENT_ENABLED:
+    gcp_storage = Storage()
+else:
+    gcp_storage = AsyncMock()  # Mock for CI/Test environment
 
 
 class TrapTaggerImageDispatcher:
