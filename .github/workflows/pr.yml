@@ -8,3 +8,5 @@ jobs:
   pr:
     uses: PADAS/gundi-workflows/.github/workflows/pipeline-dispatcher-docker-pr.yml@main
     secrets: inherit
+    with:
+      app_name: traptagger

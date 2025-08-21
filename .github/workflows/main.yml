@@ -10,5 +10,6 @@ jobs:
     uses: PADAS/gundi-workflows/.github/workflows/pipeline-dispatcher-docker-main.yml@main
     secrets: inherit
     with:
+      app_name: traptagger
       secret_name: "tt-dispatcher-defaults"
       environment: dev
