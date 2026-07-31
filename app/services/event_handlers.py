@@ -148,6 +148,33 @@ async def dispatch_image(
                 "traptagger_dispatcher.error_dispatching_observation",
                 kind=SpanKind.CLIENT,
             ) as error_span:
+                if is_missing_site_error(e):
+                    # Rejected because the camera has no site or location configured.
+                    # Warn the user with an actionable message instead of a delivery error.
+                    camera = getattr(related_event, "camera", "unknown")
+                    latitude = getattr(related_event, "latitude", "?")
+                    longitude = getattr(related_event, "longitude", "?")
+                    warning_msg = (
+                        f"TrapTagger rejected image {gundi_id}: camera '{camera}' needs a site identifier "
+                        f"or a valid location (current latitude/longitude: {latitude},{longitude}). "
+                        "Please set the camera location in the data provider."
+                    )
+                    logger.warning(warning_msg)
+                    error_span.set_attribute("error", warning_msg)
+                    await publish_event(
+                        event=system_events.DispatcherCustomLog(
+                            payload=gundi_schemas_v2.CustomDispatcherLog(
+                                gundi_id=gundi_id,
+                                related_to=related_to,
+                                data_provider_id=data_provider_id,
+                                destination_id=destination_id,
+                                title=warning_msg,
+                                level=gundi_schemas_v2.LogLevel.WARNING,
+                            )
+                        ),
+                        topic_name=settings.DISPATCHER_EVENTS_TOPIC,
+                    )
+                    raise NonRetryableDispatchError(warning_msg) from e
                 error_msg = f"Error dispatching observation {gundi_id} to destination {destination_id}: {type(e).__name__}: {e}"
                 logger.exception(error_msg)
                 error_span.set_attribute("error", error_msg)
@@ -165,32 +192,6 @@ async def dispatch_image(
                     logger.debug(
                         f"Server response: status: {server_response_status}, body: {server_response_body}"
                     )
-                if is_missing_site_error(e):
-                    # Rejected because the camera has no site or location configured.
-                    # Warn the user with an actionable message instead of a delivery error.
-                    camera = getattr(related_event, "camera", "unknown")
-                    latitude = getattr(related_event, "latitude", "?")
-                    longitude = getattr(related_event, "longitude", "?")
-                    warning_msg = (
-                        f"TrapTagger rejected image {gundi_id}: camera '{camera}' needs a site identifier "
-                        f"or a valid location (current latitude/longitude: {latitude},{longitude}). "
-                        "Please set the camera location in the data provider."
-                    )
-                    logger.warning(warning_msg)
-                    await publish_event(
-                        event=system_events.DispatcherCustomLog(
-                            payload=gundi_schemas_v2.CustomDispatcherLog(
-                                gundi_id=gundi_id,
-                                related_to=related_to,
-                                data_provider_id=data_provider_id,
-                                destination_id=destination_id,
-                                title=warning_msg,
-                                level=gundi_schemas_v2.LogLevel.WARNING,
-                            )
-                        ),
-                        topic_name=settings.DISPATCHER_EVENTS_TOPIC,
-                    )
-                    raise NonRetryableDispatchError(warning_msg) from e
                 # Emit events for the portal and other interested services (EDA)
                 await publish_event(
                     event=system_events.ObservationDeliveryFailed(
