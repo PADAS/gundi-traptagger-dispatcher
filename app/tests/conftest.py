@@ -1,3 +1,4 @@
+import base64
 import datetime
 import json
 import httpx
@@ -414,3 +415,72 @@ def mock_traptagger_error_response(request):
                 "POST", "https://test.traptagger.com/api/v1/addImage"
             ),
         )
+
+
+def _attachment_pubsub_request(mocker, event_timestamp: datetime.datetime):
+    # Same message as attachment_v2_as_pubsub_request but with a configurable event timestamp,
+    # used to test the buffer-miss paths (message age vs IMAGE_METADATA_CACHE_TTL)
+    mock_request = mocker.MagicMock()
+    mock_request.headers = [
+        ("Host", "traptagger-dis-ddd0946d-15b0-4308-b93d-e0470-jba4og2dyq-uc.a.run.app")
+    ]
+    publish_time = datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S.%fZ"
+    )
+    event_data = {
+        "event_id": "c2bcc65e-81c9-4e22-9aad-47b0f2408f01",
+        "timestamp": str(event_timestamp),
+        "schema_version": "v1",
+        "payload": {
+            "file_path": "attachments/259a2767-d7a0-462e-a881-57bf746f53d1_elephant_single_20250305.jpg"
+        },
+        "event_type": "AttachmentTransformedTrapTagger",
+    }
+    encoded_data = base64.b64encode(json.dumps(event_data).encode("utf-8")).decode(
+        "utf-8"
+    )
+    json_data = {
+        "message": {
+            "data": encoded_data,
+            "attributes": {
+                "annotations": "null",
+                "data_provider_id": "b976ac0e-135a-4212-88b7-7bfc58e897a2",
+                "destination_id": "a16f0110-bf40-4518-9c68-9018c6ec8f6d",
+                "external_source_id": "None",
+                "gundi_id": "259a2767-d7a0-462e-a881-57bf746f53d1",
+                "gundi_version": "v2",
+                "provider_key": "gundi_wps_watch_r_b976ac0e-135a-4212-88b7-7bfc58e897a2",
+                "related_to": "56a5afe0-7829-47d1-a496-80dcbf816593",
+                "source_id": "None",
+                "stream_type": "att",
+                "tracing_context": "{}",
+            },
+            "messageId": "14148756572947596",
+            "message_id": "14148756572947596",
+            "orderingKey": "",
+            "publishTime": f"{publish_time}",
+            "publish_time": f"{publish_time}",
+        },
+        "subscription": "projects/MY-PROJECT/subscriptions/MY-SUB",  # pragma: allowlist secret
+    }
+    mock_request.data = json.dumps(json_data)
+    mock_request.get_json.return_value = json_data
+    mock_request.json.return_value = async_return(json_data)
+    return mock_request
+
+
+@pytest.fixture
+def fresh_attachment_v2_as_pubsub_request(mocker):
+    # An attachment message younger than IMAGE_METADATA_CACHE_TTL
+    return _attachment_pubsub_request(
+        mocker, event_timestamp=datetime.datetime.now(datetime.timezone.utc)
+    )
+
+
+@pytest.fixture
+def expired_attachment_v2_as_pubsub_request(mocker):
+    # An attachment message older than IMAGE_METADATA_CACHE_TTL
+    event_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+        seconds=settings.IMAGE_METADATA_CACHE_TTL + 60
+    )
+    return _attachment_pubsub_request(mocker, event_timestamp=event_timestamp)

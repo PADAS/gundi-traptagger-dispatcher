@@ -142,3 +142,195 @@ async def test_process_attachment_v2_successfully(
             )
             assert response.status_code == 200
             assert route.called
+
+
+def _published_event_types(mock_pubsub_client):
+    # Extract the event_type of every message built for publishing
+    event_types = []
+    for call in mock_pubsub_client.PubsubMessage.call_args_list:
+        try:
+            message = json.loads(call.args[0])
+        except (ValueError, TypeError, IndexError):
+            continue
+        event_types.append(message.get("event_type"))
+    return event_types
+
+
+def _topics_published_to(mock_pubsub_client):
+    publisher = mock_pubsub_client.PublisherClient.return_value
+    return [call.args[1] for call in publisher.topic_path.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_process_attachment_v2_with_permanent_client_error_is_dead_lettered(
+    mocker,
+    mock_redis,
+    mock_redis_with_cached_event,
+    mock_gundi_client_v2_class,
+    mock_cloud_storage_client,
+    mock_pubsub_client,
+    attachment_v2_as_pubsub_request,
+    destination_integration_v2_traptagger,
+):
+    # Mock external dependencies
+    mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
+    mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
+    mocker.patch("app.services.event_handlers._cache_db", mock_redis_with_cached_event)
+    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
+    mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
+    async with respx.mock(
+        base_url=destination_integration_v2_traptagger.base_url,
+        assert_all_called=True,
+        assert_all_mocked=True,
+    ) as respx_mock:
+        # TrapTagger rejects the image with a permanent client error
+        route = respx_mock.post("api/v1/addImage").respond(
+            httpx.codes.BAD_REQUEST,
+            json={"message": "Missing site information."},
+        )
+        from app.main import app
+
+        with TestClient(app) as api_client:
+            response = api_client.post(
+                "/",
+                headers=attachment_v2_as_pubsub_request.headers,
+                json=attachment_v2_as_pubsub_request.get_json(),
+            )
+            # The message must be acked (no retries)
+            assert response.status_code == 200
+            assert route.call_count == 1
+
+        # Exactly one delivery failure event must be published for the portal
+        event_types = _published_event_types(mock_pubsub_client)
+        assert event_types.count("ObservationDeliveryFailed") == 1
+        # The message must be sent to the attachments dead letter topic
+        topics = _topics_published_to(mock_pubsub_client)
+        assert settings.ATTACHMENTS_DEAD_LETTER_TOPIC in topics
+
+
+@pytest.mark.asyncio
+async def test_process_attachment_v2_with_server_error_is_retried(
+    mocker,
+    mock_redis,
+    mock_redis_with_cached_event,
+    mock_gundi_client_v2_class,
+    mock_cloud_storage_client,
+    mock_pubsub_client,
+    attachment_v2_as_pubsub_request,
+    destination_integration_v2_traptagger,
+):
+    # Mock external dependencies
+    mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
+    mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
+    mocker.patch("app.services.event_handlers._cache_db", mock_redis_with_cached_event)
+    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
+    mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
+    async with respx.mock(
+        base_url=destination_integration_v2_traptagger.base_url,
+        assert_all_called=True,
+        assert_all_mocked=True,
+    ) as respx_mock:
+        # TrapTagger has a transient problem
+        respx_mock.post("api/v1/addImage").respond(
+            httpx.codes.SERVICE_UNAVAILABLE,
+            json={"message": "Service unavailable."},
+        )
+        from app.main import app
+
+        with TestClient(app) as api_client:
+            # The error must be raised so GCP retries the message
+            with pytest.raises(httpx.HTTPStatusError):
+                api_client.post(
+                    "/",
+                    headers=attachment_v2_as_pubsub_request.headers,
+                    json=attachment_v2_as_pubsub_request.get_json(),
+                )
+
+        # A delivery failure event must be published for the portal
+        event_types = _published_event_types(mock_pubsub_client)
+        assert event_types.count("ObservationDeliveryFailed") == 1
+        # The message must NOT be dead-lettered
+        topics = _topics_published_to(mock_pubsub_client)
+        assert settings.ATTACHMENTS_DEAD_LETTER_TOPIC not in topics
+
+
+@pytest.mark.asyncio
+async def test_process_attachment_v2_young_buffer_miss_is_retried(
+    mocker,
+    mock_redis,
+    mock_gundi_client_v2_class,
+    mock_cloud_storage_client,
+    mock_pubsub_client,
+    fresh_attachment_v2_as_pubsub_request,
+    destination_integration_v2_traptagger,
+):
+    from app.core.errors import ReferenceDataError
+
+    # Mock external dependencies. The metadata cache is empty (mock_redis returns None)
+    mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
+    mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
+    mocker.patch("app.services.event_handlers._cache_db", mock_redis)
+    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
+    mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
+    from app.main import app
+
+    with TestClient(app) as api_client:
+        # The error must be raised so GCP retries the message
+        with pytest.raises(ReferenceDataError) as exc_info:
+            api_client.post(
+                "/",
+                headers=fresh_attachment_v2_as_pubsub_request.headers,
+                json=fresh_attachment_v2_as_pubsub_request.get_json(),
+            )
+
+    # The error message must be a plain string (not a tuple)
+    assert isinstance(exc_info.value.args[0], str)
+    # A custom log must be published so the race is visible in the portal
+    event_types = _published_event_types(mock_pubsub_client)
+    assert event_types.count("DispatcherCustomLog") == 1
+    # The message must NOT be dead-lettered
+    topics = _topics_published_to(mock_pubsub_client)
+    assert settings.ATTACHMENTS_DEAD_LETTER_TOPIC not in topics
+
+
+@pytest.mark.asyncio
+async def test_process_attachment_v2_expired_buffer_miss_is_dead_lettered(
+    mocker,
+    mock_redis,
+    mock_gundi_client_v2_class,
+    mock_cloud_storage_client,
+    mock_pubsub_client,
+    expired_attachment_v2_as_pubsub_request,
+    destination_integration_v2_traptagger,
+):
+    # Mock external dependencies. The metadata cache is empty (mock_redis returns None)
+    mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
+    mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
+    mocker.patch("app.services.event_handlers._cache_db", mock_redis)
+    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
+    mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
+    from app.main import app
+
+    with TestClient(app) as api_client:
+        response = api_client.post(
+            "/",
+            headers=expired_attachment_v2_as_pubsub_request.headers,
+            json=expired_attachment_v2_as_pubsub_request.get_json(),
+        )
+        # The message must be acked (no retries)
+        assert response.status_code == 200
+
+    # Exactly one delivery failure event must be published for the portal
+    event_types = _published_event_types(mock_pubsub_client)
+    assert event_types.count("ObservationDeliveryFailed") == 1
+    # The message must be sent to the attachments dead letter topic
+    topics = _topics_published_to(mock_pubsub_client)
+    assert settings.ATTACHMENTS_DEAD_LETTER_TOPIC in topics

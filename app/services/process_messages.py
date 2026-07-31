@@ -6,6 +6,7 @@ from gcloud.aio import pubsub
 from gundi_core.schemas.v2 import StreamPrefixEnum
 from opentelemetry.trace import SpanKind
 from app.core import settings
+from app.core.errors import NonRetryableDispatchError
 from app.core.utils import (
     extract_fields_from_message,
 )
@@ -130,7 +131,15 @@ async def process_transformer_event_v2(raw_event, attributes):
             )
             return {}
         parsed_event = schema.parse_obj(raw_event)
-        return await handler(event=parsed_event, attributes=attributes)
+        try:
+            return await handler(event=parsed_event, attributes=attributes)
+        except NonRetryableDispatchError as e:
+            logger.warning(
+                f"Permanent error processing event of type '{event_type}': {e}. Sending message to the dead letter topic."
+            )
+            current_span.set_attribute("is_sent_to_dead_letter_queue", True)
+            await send_observation_to_dead_letter_topic(raw_event, attributes)
+            return {"status": "dead-lettered"}
 
 
 async def process_request(request):
