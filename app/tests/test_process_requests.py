@@ -188,7 +188,7 @@ async def test_process_attachment_v2_with_permanent_client_error_is_dead_lettere
         # TrapTagger rejects the image with a permanent client error
         route = respx_mock.post("api/v1/addImage").respond(
             httpx.codes.BAD_REQUEST,
-            json={"message": "Missing site information."},
+            json={"message": "No image provided."},
         )
         from app.main import app
 
@@ -360,7 +360,7 @@ async def test_process_attachment_v2_without_location_warns_and_dead_letters(
     mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
     async with respx.mock(
         base_url=destination_integration_v2_traptagger.base_url,
-        assert_all_called=False,
+        assert_all_called=True,
         assert_all_mocked=True,
     ) as respx_mock:
         route = respx_mock.post("api/v1/addImage").respond(
@@ -377,8 +377,8 @@ async def test_process_attachment_v2_without_location_warns_and_dead_letters(
             )
             # The message must be acked (no retries)
             assert response.status_code == 200
-            # TrapTagger must NOT be called: the request is known to fail
-            assert not route.called
+            # The image is still posted, in case TrapTagger accepts it in the future
+            assert route.call_count == 1
 
     # A WARNING custom log must be published instead of a delivery error
     event_types = _published_event_types(mock_pubsub_client)
@@ -388,7 +388,7 @@ async def test_process_attachment_v2_without_location_warns_and_dead_letters(
         message = json.loads(call.args[0])
         if message.get("event_type") == "DispatcherCustomLog":
             assert message["payload"]["level"] == 30  # WARNING
-            assert "site identifier or location" in message["payload"]["title"]
+            assert "site identifier or a valid location" in message["payload"]["title"]
     # The message must be sent to the attachments dead letter topic
     topics = _topics_published_to(mock_pubsub_client)
     assert settings.ATTACHMENTS_DEAD_LETTER_TOPIC in topics

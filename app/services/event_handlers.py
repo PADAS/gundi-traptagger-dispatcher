@@ -117,18 +117,14 @@ def is_permanent_client_error(exception: Exception) -> bool:
     return 400 <= status_code < 500 and status_code not in (408, 429)
 
 
-def has_valid_location(
-    related_event: gundi_schemas_v2.TrapTaggerImageMetadata,
-) -> bool:
-    # TrapTagger resolves the site from the coordinates. A 0,0 location means
-    # the camera has no location configured at the source, and TrapTagger
-    # rejects it with "400 Missing site information"
-    try:
-        latitude = float(related_event.latitude)
-        longitude = float(related_event.longitude)
-    except (TypeError, ValueError):
+def is_missing_site_error(exception: Exception) -> bool:
+    # TrapTagger resolves the site from the coordinates. A camera with no
+    # location configured at the source (0,0) is rejected with this error
+    if not isinstance(exception, httpx.HTTPStatusError):
         return False
-    return latitude != 0.0 or longitude != 0.0
+    if exception.response.status_code != 400:
+        return False
+    return "missing site information" in exception.response.text.lower()
 
 
 async def dispatch_image(
@@ -169,6 +165,32 @@ async def dispatch_image(
                     logger.debug(
                         f"Server response: status: {server_response_status}, body: {server_response_body}"
                     )
+                if is_missing_site_error(e):
+                    # Rejected because the camera has no site or location configured.
+                    # Warn the user with an actionable message instead of a delivery error.
+                    camera = getattr(related_event, "camera", "unknown")
+                    latitude = getattr(related_event, "latitude", "?")
+                    longitude = getattr(related_event, "longitude", "?")
+                    warning_msg = (
+                        f"TrapTagger rejected image {gundi_id}: camera '{camera}' needs a site identifier "
+                        f"or a valid location (current latitude/longitude: {latitude},{longitude}). "
+                        "Please set the camera location in the data provider."
+                    )
+                    logger.warning(warning_msg)
+                    await publish_event(
+                        event=system_events.DispatcherCustomLog(
+                            payload=gundi_schemas_v2.CustomDispatcherLog(
+                                gundi_id=gundi_id,
+                                related_to=related_to,
+                                data_provider_id=data_provider_id,
+                                destination_id=destination_id,
+                                title=warning_msg,
+                                level=gundi_schemas_v2.LogLevel.WARNING,
+                            )
+                        ),
+                        topic_name=settings.DISPATCHER_EVENTS_TOPIC,
+                    )
+                    raise NonRetryableDispatchError(warning_msg) from e
                 # Emit events for the portal and other interested services (EDA)
                 await publish_event(
                     event=system_events.ObservationDeliveryFailed(
@@ -368,30 +390,6 @@ async def handle_traptagger_attachment(
                 topic_name=settings.DISPATCHER_EVENTS_TOPIC,
             )
             raise NonRetryableDispatchError(error_msg) from e
-        if related_event and not has_valid_location(related_event):
-            # TrapTagger will reject the image, so warn the user instead of posting it
-            warning_msg = (
-                f"Image {gundi_id} was not sent to TrapTagger because camera '{related_event.camera}' "
-                f"has no location set (latitude/longitude are {related_event.latitude},{related_event.longitude}). "
-                "TrapTagger requires a site identifier or location to accept images. "
-                "Please set the camera location in the data provider."
-            )
-            logger.warning(warning_msg)
-            current_span.set_attribute("error", warning_msg)
-            await publish_event(
-                event=system_events.DispatcherCustomLog(
-                    payload=gundi_schemas_v2.CustomDispatcherLog(
-                        gundi_id=gundi_id,
-                        related_to=related_to,
-                        data_provider_id=data_provider_id,
-                        destination_id=destination_id,
-                        title=warning_msg,
-                        level=gundi_schemas_v2.LogLevel.WARNING,
-                    )
-                ),
-                topic_name=settings.DISPATCHER_EVENTS_TOPIC,
-            )
-            raise NonRetryableDispatchError(warning_msg)
         # Send image plus metadata to WPS Watch
         return await dispatch_image(
             integration=destination_integration,
