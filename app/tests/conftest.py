@@ -484,3 +484,27 @@ def expired_attachment_v2_as_pubsub_request(mocker):
         seconds=settings.IMAGE_METADATA_CACHE_TTL + 60
     )
     return _attachment_pubsub_request(mocker, event_timestamp=event_timestamp)
+
+
+@pytest.fixture
+def cached_event_without_location():
+    # Camera with no location configured at the source (real case from GUNDI-5535)
+    return '{"camera": "Benguerra South 01", "latitude": "0.0", "longitude": "0.0", "timestamp": "2026-07-31 15:19:46"}'
+
+
+@pytest.fixture
+def mock_redis_with_cached_event_without_location(
+    mocker, cached_event_without_location
+):
+    mock_cache = mocker.MagicMock()
+    mock_cache.get.return_value = async_return(cached_event_without_location)
+    mock_cache.setex.return_value = async_return(None)
+    mock_cache.incr.return_value = mock_cache
+    mock_cache.decr.return_value = async_return(None)
+    mock_cache.expire.return_value = mock_cache
+    mock_cache.execute.return_value = async_return((1, True))
+    mock_cache.__aenter__.return_value = mock_cache
+    mock_cache.__aexit__.return_value = None
+    mock_cache.close.return_value = async_return(None)
+    mock_cache.pipeline.return_value = mock_cache
+    return mock_cache
