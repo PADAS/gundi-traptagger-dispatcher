@@ -68,7 +68,10 @@ async def test_dispatch_image_successfully(
 @pytest.mark.parametrize(
     "mock_traptagger_error_response,expected_exception",
     [
-        ("bad_credentials", NonRetryableDispatchError),
+        # Auth errors are retried: a rotated/expired API key is usually fixed,
+        # and dead-lettering on first attempt would force a bulk DLQ replay
+        ("bad_credentials", httpx.HTTPStatusError),
+        ("forbidden", httpx.HTTPStatusError),
         ("bad_request", NonRetryableDispatchError),
         ("service_unavailable", httpx.HTTPStatusError),
         ("internal_error", httpx.HTTPStatusError),

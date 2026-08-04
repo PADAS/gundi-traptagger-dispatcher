@@ -355,6 +355,14 @@ def mock_traptagger_error_response(request):
                 "POST", "https://test.traptagger.com/api/v1/addImage"
             ),
         )
+    elif request.param == "forbidden":
+        return httpx.Response(
+            status_code=403,
+            content=b'{"message": "Forbidden."}',
+            request=httpx.Request(
+                "POST", "https://test.traptagger.com/api/v1/addImage"
+            ),
+        )
     elif request.param == "bad_request":
         return httpx.Response(
             status_code=400,

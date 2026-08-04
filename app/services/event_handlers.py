@@ -110,11 +110,12 @@ async def get_related_event(event_id, destination_id):
 
 
 def is_permanent_client_error(exception: Exception) -> bool:
+    # 401/403 (auth) are retried because a rotated/expired API key is usually fixed;
     # 408 (timeout) and 429 (rate limit) are transient; other 4xx cannot succeed by retrying
     if not isinstance(exception, httpx.HTTPStatusError):
         return False
     status_code = exception.response.status_code
-    return 400 <= status_code < 500 and status_code not in (408, 429)
+    return 400 <= status_code < 500 and status_code not in (401, 403, 408, 429)
 
 
 def is_missing_site_error(exception: Exception) -> bool:
