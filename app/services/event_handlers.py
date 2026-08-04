@@ -174,6 +174,27 @@ async def dispatch_image(
                         ),
                         topic_name=settings.DISPATCHER_EVENTS_TOPIC,
                     )
+                    # Also record a delivery failure so the observation doesn't
+                    # look perpetually in-flight in the portal delivery status
+                    await publish_event(
+                        event=system_events.ObservationDeliveryFailed(
+                            payload=system_events.DeliveryErrorDetails(
+                                error=warning_msg,
+                                error_traceback=traceback.format_exc(),
+                                server_response_status=e.response.status_code,
+                                server_response_body=e.response.text,
+                                observation=gundi_schemas_v2.DispatchedObservation(
+                                    gundi_id=gundi_id,
+                                    related_to=related_to,
+                                    external_id=None,
+                                    data_provider_id=data_provider_id,
+                                    destination_id=destination_id,
+                                    delivered_at=datetime.now(timezone.utc),  # UTC
+                                ),
+                            )
+                        ),
+                        topic_name=settings.DISPATCHER_EVENTS_TOPIC,
+                    )
                     raise NonRetryableDispatchError(warning_msg) from e
                 error_msg = f"Error dispatching observation {gundi_id} to destination {destination_id}: {type(e).__name__}: {e}"
                 logger.exception(error_msg)

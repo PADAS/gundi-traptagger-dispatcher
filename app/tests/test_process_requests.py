@@ -380,15 +380,20 @@ async def test_process_attachment_v2_without_location_warns_and_dead_letters(
             # The image is still posted, in case TrapTagger accepts it in the future
             assert route.call_count == 1
 
-    # A WARNING custom log must be published instead of a delivery error
+    # A WARNING custom log must be published with the actionable message,
+    # and a delivery failure must also be recorded so the portal doesn't
+    # show the observation as perpetually in-flight
     event_types = _published_event_types(mock_pubsub_client)
     assert event_types.count("DispatcherCustomLog") == 1
-    assert event_types.count("ObservationDeliveryFailed") == 0
+    assert event_types.count("ObservationDeliveryFailed") == 1
     for call in mock_pubsub_client.PubsubMessage.call_args_list:
         message = json.loads(call.args[0])
         if message.get("event_type") == "DispatcherCustomLog":
             assert message["payload"]["level"] == 30  # WARNING
             assert "site identifier or a valid location" in message["payload"]["title"]
+        elif message.get("event_type") == "ObservationDeliveryFailed":
+            assert message["payload"]["server_response_status"] == 400
+            assert "site identifier or a valid location" in message["payload"]["error"]
     # The message must be sent to the attachments dead letter topic
     topics = _topics_published_to(mock_pubsub_client)
     assert settings.ATTACHMENTS_DEAD_LETTER_TOPIC in topics
