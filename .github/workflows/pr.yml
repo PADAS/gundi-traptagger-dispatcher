@@ -6,7 +6,9 @@ on:
 
 jobs:
   pr:
-    uses: PADAS/gundi-workflows/.github/workflows/pipeline-dispatcher-docker-pr.yml@main
+    # Pinned to v8: @main pulls BuildKit from the serca-artifact-registry mirror
+    # without authenticating to it on the SA-based auth path (DASOPS-2057).
+    uses: PADAS/gundi-workflows/.github/workflows/pipeline-dispatcher-docker-pr.yml@v8
     secrets: inherit
     with:
       app_name: traptagger
