@@ -1,3 +1,4 @@
+import base64
 import datetime
 import json
 import httpx
@@ -15,10 +16,9 @@ def async_return(result):
     return f
 
 
-@pytest.fixture
-def mock_redis(mocker):
+def _mock_redis_cache(mocker, cached_value=None):
     mock_cache = mocker.MagicMock()
-    mock_cache.get.return_value = async_return(None)
+    mock_cache.get.return_value = async_return(cached_value)
     mock_cache.setex.return_value = async_return(None)
     mock_cache.incr.return_value = mock_cache
     mock_cache.decr.return_value = async_return(None)
@@ -29,6 +29,11 @@ def mock_redis(mocker):
     mock_cache.close.return_value = async_return(None)
     mock_cache.pipeline.return_value = mock_cache
     return mock_cache
+
+
+@pytest.fixture
+def mock_redis(mocker):
+    return _mock_redis_cache(mocker)
 
 
 @pytest.fixture
@@ -38,18 +43,7 @@ def cached_event():
 
 @pytest.fixture
 def mock_redis_with_cached_event(mocker, cached_event):
-    mock_cache = mocker.MagicMock()
-    mock_cache.get.return_value = async_return(cached_event)
-    mock_cache.setex.return_value = async_return(None)
-    mock_cache.incr.return_value = mock_cache
-    mock_cache.decr.return_value = async_return(None)
-    mock_cache.expire.return_value = mock_cache
-    mock_cache.execute.return_value = async_return((1, True))
-    mock_cache.__aenter__.return_value = mock_cache
-    mock_cache.__aexit__.return_value = None
-    mock_cache.close.return_value = async_return(None)
-    mock_cache.pipeline.return_value = mock_cache
-    return mock_cache
+    return _mock_redis_cache(mocker, cached_event)
 
 
 @pytest.fixture
@@ -259,41 +253,12 @@ def event_v2_as_pubsub_request(mocker):
 
 @pytest.fixture
 def attachment_v2_as_pubsub_request(mocker):
-    mock_request = mocker.MagicMock()
-    mock_request.headers = [
-        ("Host", "traptagger-dis-ddd0946d-15b0-4308-b93d-e0470-jba4og2dyq-uc.a.run.app")
-    ]
-    publish_time = datetime.datetime.now(datetime.timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%S.%fZ"
+    return _attachment_pubsub_request(
+        mocker,
+        event_timestamp=datetime.datetime.fromisoformat(
+            "2025-03-05 12:20:22.700737+00:00"
+        ),
     )
-    json_data = {
-        "message": {
-            "data": "eyJldmVudF9pZCI6ICJjMmJjYzY1ZS04MWM5LTRlMjItOWFhZC00N2IwZjI0MDhmMDEiLCAidGltZXN0YW1wIjogIjIwMjUtMDMtMDUgMTI6MjA6MjIuNzAwNzM3KzAwOjAwIiwgInNjaGVtYV92ZXJzaW9uIjogInYxIiwgInBheWxvYWQiOiB7ImZpbGVfcGF0aCI6ICJhdHRhY2htZW50cy8yNTlhMjc2Ny1kN2EwLTQ2MmUtYTg4MS01N2JmNzQ2ZjUzZDFfZWxlcGhhbnRfc2luZ2xlXzIwMjUwMzA1LmpwZyJ9LCAiZXZlbnRfdHlwZSI6ICJBdHRhY2htZW50VHJhbnNmb3JtZWRUcmFwVGFnZ2VyIn0=",  # pragma: allowlist secret
-            "attributes": {
-                "annotations": "null",
-                "data_provider_id": "b976ac0e-135a-4212-88b7-7bfc58e897a2",
-                "destination_id": "a16f0110-bf40-4518-9c68-9018c6ec8f6d",
-                "external_source_id": "None",
-                "gundi_id": "259a2767-d7a0-462e-a881-57bf746f53d1",
-                "gundi_version": "v2",
-                "provider_key": "gundi_wps_watch_r_b976ac0e-135a-4212-88b7-7bfc58e897a2",
-                "related_to": "56a5afe0-7829-47d1-a496-80dcbf816593",
-                "source_id": "None",
-                "stream_type": "att",
-                "tracing_context": "{}",
-            },
-            "messageId": "14148756572947596",
-            "message_id": "14148756572947596",
-            "orderingKey": "",
-            "publishTime": f"{publish_time}",
-            "publish_time": f"{publish_time}",
-        },
-        "subscription": "projects/MY-PROJECT/subscriptions/MY-SUB",  # pragma: allowlist secret
-    }
-    mock_request.data = json.dumps(json_data)
-    mock_request.get_json.return_value = json_data
-    mock_request.json.return_value = async_return(json_data)
-    return mock_request
 
 
 @pytest.fixture
@@ -390,6 +355,14 @@ def mock_traptagger_error_response(request):
                 "POST", "https://test.traptagger.com/api/v1/addImage"
             ),
         )
+    elif request.param == "forbidden":
+        return httpx.Response(
+            status_code=403,
+            content=b'{"message": "Forbidden."}',
+            request=httpx.Request(
+                "POST", "https://test.traptagger.com/api/v1/addImage"
+            ),
+        )
     elif request.param == "bad_request":
         return httpx.Response(
             status_code=400,
@@ -414,3 +387,85 @@ def mock_traptagger_error_response(request):
                 "POST", "https://test.traptagger.com/api/v1/addImage"
             ),
         )
+
+
+def _attachment_pubsub_request(mocker, event_timestamp: datetime.datetime):
+    # Same message as attachment_v2_as_pubsub_request but with a configurable event timestamp,
+    # used to test the buffer-miss paths (message age vs IMAGE_METADATA_CACHE_TTL)
+    mock_request = mocker.MagicMock()
+    mock_request.headers = [
+        ("Host", "traptagger-dis-ddd0946d-15b0-4308-b93d-e0470-jba4og2dyq-uc.a.run.app")
+    ]
+    publish_time = datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S.%fZ"
+    )
+    event_data = {
+        "event_id": "c2bcc65e-81c9-4e22-9aad-47b0f2408f01",
+        "timestamp": str(event_timestamp),
+        "schema_version": "v1",
+        "payload": {
+            "file_path": "attachments/259a2767-d7a0-462e-a881-57bf746f53d1_elephant_single_20250305.jpg"
+        },
+        "event_type": "AttachmentTransformedTrapTagger",
+    }
+    encoded_data = base64.b64encode(json.dumps(event_data).encode("utf-8")).decode(
+        "utf-8"
+    )
+    json_data = {
+        "message": {
+            "data": encoded_data,
+            "attributes": {
+                "annotations": "null",
+                "data_provider_id": "b976ac0e-135a-4212-88b7-7bfc58e897a2",
+                "destination_id": "a16f0110-bf40-4518-9c68-9018c6ec8f6d",
+                "external_source_id": "None",
+                "gundi_id": "259a2767-d7a0-462e-a881-57bf746f53d1",
+                "gundi_version": "v2",
+                "provider_key": "gundi_wps_watch_r_b976ac0e-135a-4212-88b7-7bfc58e897a2",
+                "related_to": "56a5afe0-7829-47d1-a496-80dcbf816593",
+                "source_id": "None",
+                "stream_type": "att",
+                "tracing_context": "{}",
+            },
+            "messageId": "14148756572947596",
+            "message_id": "14148756572947596",
+            "orderingKey": "",
+            "publishTime": f"{publish_time}",
+            "publish_time": f"{publish_time}",
+        },
+        "subscription": "projects/MY-PROJECT/subscriptions/MY-SUB",  # pragma: allowlist secret
+    }
+    mock_request.data = json.dumps(json_data)
+    mock_request.get_json.return_value = json_data
+    mock_request.json.return_value = async_return(json_data)
+    return mock_request
+
+
+@pytest.fixture
+def fresh_attachment_v2_as_pubsub_request(mocker):
+    # An attachment message younger than IMAGE_METADATA_CACHE_TTL
+    return _attachment_pubsub_request(
+        mocker, event_timestamp=datetime.datetime.now(datetime.timezone.utc)
+    )
+
+
+@pytest.fixture
+def expired_attachment_v2_as_pubsub_request(mocker):
+    # An attachment message older than IMAGE_METADATA_CACHE_TTL
+    event_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
+        seconds=settings.IMAGE_METADATA_CACHE_TTL + 60
+    )
+    return _attachment_pubsub_request(mocker, event_timestamp=event_timestamp)
+
+
+@pytest.fixture
+def cached_event_without_location():
+    # Camera with no location configured at the source (real case from GUNDI-5535)
+    return '{"camera": "Benguerra South 01", "latitude": "0.0", "longitude": "0.0", "timestamp": "2026-07-31 15:19:46"}'
+
+
+@pytest.fixture
+def mock_redis_with_cached_event_without_location(
+    mocker, cached_event_without_location
+):
+    return _mock_redis_cache(mocker, cached_event_without_location)

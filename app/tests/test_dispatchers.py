@@ -3,6 +3,7 @@ import httpx
 import pytest
 from gundi_core.events import dispatchers as dispatcher_events
 from app.core import settings
+from app.core.errors import NonRetryableDispatchError
 
 
 @pytest.mark.parametrize(
@@ -65,18 +66,22 @@ async def test_dispatch_image_successfully(
 
 
 @pytest.mark.parametrize(
-    "mock_traptagger_error_response",
+    "mock_traptagger_error_response,expected_exception",
     [
-        "bad_credentials",
-        "bad_request",
-        "service_unavailable",
-        "internal_error",
+        # Auth errors are retried: a rotated/expired API key is usually fixed,
+        # and dead-lettering on first attempt would force a bulk DLQ replay
+        ("bad_credentials", httpx.HTTPStatusError),
+        ("forbidden", httpx.HTTPStatusError),
+        ("bad_request", NonRetryableDispatchError),
+        ("service_unavailable", httpx.HTTPStatusError),
+        ("internal_error", httpx.HTTPStatusError),
     ],
     indirect=["mock_traptagger_error_response"],
 )
 @pytest.mark.asyncio
 async def test_dispatch_image_on_errors(
     mock_traptagger_error_response,
+    expected_exception,
     mocker,
     mock_redis,
     mock_cloud_storage_client,
@@ -104,7 +109,7 @@ async def test_dispatch_image_on_errors(
             status_code=mock_traptagger_error_response.status_code,
             content=mock_traptagger_error_response.text,
         )
-        with pytest.raises(Exception):
+        with pytest.raises(expected_exception):
             await dispatch_image(
                 integration=destination_integration_v2_traptagger,
                 image=attachment_v2_transformed_traptagger.payload,
@@ -127,3 +132,49 @@ async def test_dispatch_image_on_errors(
     assert payload.error
     assert payload.server_response_status == mock_traptagger_error_response.status_code
     assert payload.server_response_body == mock_traptagger_error_response.text
+
+
+@pytest.mark.asyncio
+async def test_dispatch_image_on_error_without_response(
+    mocker,
+    mock_redis,
+    mock_cloud_storage_client,
+    mock_publish_event,
+    event_v2_transformed_traptagger,
+    attachment_v2_transformed_traptagger,
+    attachment_v2_transformed_traptagger_attributes,
+    destination_integration_v2_traptagger,
+):
+    # Errors without a response attached (e.g. connection errors) must also be reported
+    from app.services.event_handlers import dispatch_image
+
+    # Mock external dependencies
+    mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.services.event_handlers.publish_event", mock_publish_event)
+    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
+
+    async with respx.mock(
+        base_url=destination_integration_v2_traptagger.base_url,
+        assert_all_called=True,
+        assert_all_mocked=True,
+    ) as respx_mock:
+        respx_mock.post("/api/v1/addImage").mock(
+            side_effect=httpx.ConnectError("Connection refused")
+        )
+        with pytest.raises(httpx.ConnectError):
+            await dispatch_image(
+                integration=destination_integration_v2_traptagger,
+                image=attachment_v2_transformed_traptagger.payload,
+                related_event=event_v2_transformed_traptagger.payload,
+                attributes=attachment_v2_transformed_traptagger_attributes,
+            )
+
+    # The failure must be published, with no server response details
+    assert mock_publish_event.call_count == 1
+    published_event = mock_publish_event.call_args_list[0].kwargs["event"]
+    assert isinstance(published_event, dispatcher_events.ObservationDeliveryFailed)
+    payload = published_event.payload
+    assert isinstance(payload.error, str)
+    assert payload.server_response_status is None
+    assert payload.server_response_body is None

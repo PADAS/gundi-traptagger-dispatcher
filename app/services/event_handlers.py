@@ -9,7 +9,7 @@ from gundi_core.events.transformers import (
     AttachmentTransformedTrapTagger,
 )
 from app.core import tracing, settings
-from app.core.errors import ReferenceDataError
+from app.core.errors import NonRetryableDispatchError, ReferenceDataError
 from app.core.utils import (
     is_null,
     get_redis_db,
@@ -103,12 +103,29 @@ async def get_related_event(event_id, destination_id):
         gundi_id=event_id, destination_id=destination_id
     )
     if not related_observation:
-        error_msg = (
-            f"Error getting related observation {event_id}. Will retry later.",
-        )
+        error_msg = f"Error getting related observation {event_id}. Will retry later."
         logger.error(error_msg)
         raise ReferenceDataError(error_msg)
     return related_observation
+
+
+def is_permanent_client_error(exception: Exception) -> bool:
+    # 401/403 (auth) are retried because a rotated/expired API key is usually fixed;
+    # 408 (timeout) and 429 (rate limit) are transient; other 4xx cannot succeed by retrying
+    if not isinstance(exception, httpx.HTTPStatusError):
+        return False
+    status_code = exception.response.status_code
+    return 400 <= status_code < 500 and status_code not in (401, 403, 408, 429)
+
+
+def is_missing_site_error(exception: Exception) -> bool:
+    # TrapTagger resolves the site from the coordinates. A camera with no
+    # location configured at the source (0,0) is rejected with this error
+    if not isinstance(exception, httpx.HTTPStatusError):
+        return False
+    if exception.response.status_code != 400:
+        return False
+    return "missing site information" in exception.response.text.lower()
 
 
 async def dispatch_image(
@@ -132,10 +149,60 @@ async def dispatch_image(
                 "traptagger_dispatcher.error_dispatching_observation",
                 kind=SpanKind.CLIENT,
             ) as error_span:
+                if is_missing_site_error(e):
+                    # Rejected because the camera has no site or location configured.
+                    # Warn the user with an actionable message instead of a delivery error.
+                    camera = getattr(related_event, "camera", "unknown")
+                    latitude = getattr(related_event, "latitude", "?")
+                    longitude = getattr(related_event, "longitude", "?")
+                    warning_msg = (
+                        f"TrapTagger rejected image {gundi_id}: camera '{camera}' needs a site identifier "
+                        f"or a valid location (current latitude/longitude: {latitude},{longitude}). "
+                        "Please set the camera location in the data provider."
+                    )
+                    logger.warning(warning_msg)
+                    error_span.set_attribute("error", warning_msg)
+                    await publish_event(
+                        event=system_events.DispatcherCustomLog(
+                            payload=gundi_schemas_v2.CustomDispatcherLog(
+                                gundi_id=gundi_id,
+                                related_to=related_to,
+                                data_provider_id=data_provider_id,
+                                destination_id=destination_id,
+                                title=warning_msg,
+                                level=gundi_schemas_v2.LogLevel.WARNING,
+                            )
+                        ),
+                        topic_name=settings.DISPATCHER_EVENTS_TOPIC,
+                    )
+                    # Also record a delivery failure so the observation doesn't
+                    # look perpetually in-flight in the portal delivery status
+                    await publish_event(
+                        event=system_events.ObservationDeliveryFailed(
+                            payload=system_events.DeliveryErrorDetails(
+                                error=warning_msg,
+                                error_traceback=traceback.format_exc(),
+                                server_response_status=e.response.status_code,
+                                server_response_body=e.response.text,
+                                observation=gundi_schemas_v2.DispatchedObservation(
+                                    gundi_id=gundi_id,
+                                    related_to=related_to,
+                                    external_id=None,
+                                    data_provider_id=data_provider_id,
+                                    destination_id=destination_id,
+                                    delivered_at=datetime.now(timezone.utc),  # UTC
+                                ),
+                            )
+                        ),
+                        topic_name=settings.DISPATCHER_EVENTS_TOPIC,
+                    )
+                    raise NonRetryableDispatchError(warning_msg) from e
                 error_msg = f"Error dispatching observation {gundi_id} to destination {destination_id}: {type(e).__name__}: {e}"
                 logger.exception(error_msg)
                 error_span.set_attribute("error", error_msg)
                 # Extract additional response details if available
+                server_response_status = None
+                server_response_body = None
                 if (
                     response := getattr(e, "response", None)
                 ) is not None:  # bool(response) on status errors returns False
@@ -167,6 +234,9 @@ async def dispatch_image(
                     ),
                     topic_name=settings.DISPATCHER_EVENTS_TOPIC,
                 )
+                if is_permanent_client_error(e):
+                    # Retrying cannot succeed. Send to DLQ and ack instead.
+                    raise NonRetryableDispatchError(error_msg) from e
                 # Raise so it can be retried by GCP
                 raise e
         else:
@@ -218,6 +288,8 @@ async def handle_traptagger_event(event: EventTransformedTrapTagger, attributes:
             error_msg = f"Error caching image metadata for {gundi_id} and {destination_id}: {type(e).__name__}: {e}"
             logger.exception(error_msg)
             # Extract additional response details if available
+            server_response_status = None
+            server_response_body = None
             if (
                 response := getattr(e, "response", None)
             ) is not None:  # bool(response) on status errors returns False
@@ -277,6 +349,8 @@ async def handle_traptagger_attachment(
         "traptagger_dispatcher.handle_traptagger_attachment", kind=SpanKind.CONSUMER
     ) as current_span:
         current_span.set_attribute("payload", repr(event.payload))
+        gundi_id = attributes.get("gundi_id")
+        data_provider_id = attributes.get("data_provider_id")
         destination_id = attributes.get("destination_id")
         current_span.set_attribute("destination_id", destination_id)
         destination_integration = await get_destination_integration(
@@ -285,9 +359,60 @@ async def handle_traptagger_attachment(
         # Look for the related event which contains the camera ID
         related_to = attributes.get("related_to")
         current_span.set_attribute("destination_id", destination_id)
-        related_event = await get_related_event(
-            event_id=related_to, destination_id=destination_id
-        )
+        try:
+            related_event = await get_related_event(
+                event_id=related_to, destination_id=destination_id
+            )
+        except ReferenceDataError as e:
+            event_time = event.timestamp
+            if event_time.tzinfo is None:
+                event_time = event_time.replace(tzinfo=timezone.utc)
+            event_age_seconds = (
+                datetime.now(timezone.utc) - event_time
+            ).total_seconds()
+            if event_age_seconds < settings.IMAGE_METADATA_CACHE_TTL:
+                # Normal race: the attachment arrived before its metadata.
+                # The metadata may still arrive, so warn and retry.
+                await publish_event(
+                    event=system_events.DispatcherCustomLog(
+                        payload=gundi_schemas_v2.CustomDispatcherLog(
+                            gundi_id=gundi_id,
+                            related_to=related_to,
+                            data_provider_id=data_provider_id,
+                            destination_id=destination_id,
+                            title=f"Attachment {gundi_id} received before the metadata of related observation {related_to}. It will be retried.",
+                            level=gundi_schemas_v2.LogLevel.WARNING,
+                        )
+                    ),
+                    topic_name=settings.DISPATCHER_EVENTS_TOPIC,
+                )
+                raise e
+            # The metadata cache TTL has expired, so this attachment can never be delivered
+            error_msg = (
+                f"Error dispatching attachment {gundi_id} to destination {destination_id}: "
+                f"metadata of related observation {related_to} was not found and the message is older "
+                f"than IMAGE_METADATA_CACHE_TTL ({settings.IMAGE_METADATA_CACHE_TTL} seconds). It will not be retried."
+            )
+            logger.error(error_msg)
+            current_span.set_attribute("error", error_msg)
+            await publish_event(
+                event=system_events.ObservationDeliveryFailed(
+                    payload=system_events.DeliveryErrorDetails(
+                        error=error_msg,
+                        error_traceback=traceback.format_exc(),
+                        observation=gundi_schemas_v2.DispatchedObservation(
+                            gundi_id=gundi_id,
+                            related_to=related_to,
+                            external_id=None,
+                            data_provider_id=data_provider_id,
+                            destination_id=destination_id,
+                            delivered_at=datetime.now(timezone.utc),  # UTC
+                        ),
+                    )
+                ),
+                topic_name=settings.DISPATCHER_EVENTS_TOPIC,
+            )
+            raise NonRetryableDispatchError(error_msg) from e
         # Send image plus metadata to WPS Watch
         return await dispatch_image(
             integration=destination_integration,
