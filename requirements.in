@@ -18,4 +18,6 @@ opentelemetry-propagator-gcp
 opentelemetry-exporter-otlp-proto-http
 opentelemetry-instrumentation-aiohttp-client==0.35b0
 opentelemetry-instrumentation-httpx==0.35b0
+# opentelemetry 1.14 imports pkg_resources, which setuptools >= 80 removed;
+# pinned and compiled with --allow-unsafe so the lockfile keeps it.
 setuptools==75.3.4

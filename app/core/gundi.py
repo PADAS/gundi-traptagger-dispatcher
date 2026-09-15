@@ -9,6 +9,7 @@ from app.core.utils import (
 )
 from gundi_core.schemas import v2 as gundi_schemas_v2
 from gundi_client_v2 import GundiClient
+from gundi_client_v2.errors import GundiAPIError, GundiClientError
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,18 @@ connect_timeout, read_timeout = settings.DEFAULT_REQUESTS_TIMEOUT
 _cache_ttl = settings.PORTAL_CONFIG_OBJECT_CACHE_TTL
 
 
-@backoff.on_exception(backoff.expo, (httpx.HTTPError,), max_tries=5)
+def _portal_error_is_permanent(exc: Exception) -> bool:
+    """A 4xx from the portal (missing integration, bad request) will not
+    succeed on retry; everything else (5xx, auth/transport failures) may."""
+    return isinstance(exc, GundiAPIError) and 400 <= exc.status_code < 500
+
+
+@backoff.on_exception(
+    backoff.expo,
+    (httpx.HTTPError, GundiClientError),
+    max_tries=5,
+    giveup=_portal_error_is_permanent,
+)
 async def get_integration_details(integration_id: str) -> gundi_schemas_v2.Integration:
     """
     Helper function to retrieve integration configurations from Gundi API v2
