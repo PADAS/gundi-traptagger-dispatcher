@@ -9,9 +9,10 @@ jobs:
   main:
     # Pinned to v8: @main pulls BuildKit from the serca-artifact-registry mirror
     # without authenticating to it on the SA-based auth path (DASOPS-2057).
-    uses: PADAS/gundi-workflows/.github/workflows/pipeline-dispatcher-docker-main.yml@v8
+    uses: PADAS/gundi-workflows/.github/workflows/pipeline-dispatcher-docker-main.yml@main
     secrets: inherit
     with:
       app_name: traptagger
+      python_version: '3.10'
       secret_name: "tt-dispatcher-defaults"
       environment: dev

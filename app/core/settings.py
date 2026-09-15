@@ -44,6 +44,70 @@ REDIS_HOST = env.str("REDIS_HOST", "localhost")
 REDIS_PORT = env.int("REDIS_PORT", 6379)
 REDIS_DB = env.int("REDIS_DB", 3)
 
+REDIS_TOKEN_CACHE_DB = env.int("REDIS_TOKEN_CACHE_DB", 2)
+
+
+def _require_explicit_redis_db(url: str) -> None:
+    """A redis:// URL must name its database as a number: redis-py maps a
+    missing or non-numeric path (redis://host:6379, redis://host/tokens) to
+    db 0, which another consumer may own."""
+    from redis.connection import parse_url as _parse_redis_url
+
+    if not url.startswith(("redis://", "rediss://")):
+        return
+    if _parse_redis_url(url).get("db") is None:
+        raise ValueError(
+            "a redis:// token cache URL must name a numeric database index "
+            "(e.g. redis://host:6379/2)"
+        )
+
+
+def validated_token_cache_url(url: str) -> str:
+    """Return ``url`` if gundi-client-v2 can build a token cache backend from
+    it, else "" (tokens shared within the process only) after one warning.
+    A bad cache URL must not take the dispatcher down; redis connects lazily,
+    so an unreachable Redis is handled by the client at request time."""
+    from gundi_client_v2.errors import TokenCacheConfigError
+    from gundi_client_v2.token_cache import token_cache_from_url
+
+    if not url:
+        return ""
+    try:
+        _require_explicit_redis_db(url)
+        token_cache_from_url(url)
+    except (TokenCacheConfigError, ValueError) as e:
+        logging.getLogger(__name__).warning(
+            "GUNDI_TOKEN_CACHE_URL is unusable (%s: %s); Gundi OAuth tokens will be "
+            "shared within this process only. Check REDIS_HOST/REDIS_PORT/"
+            "REDIS_TOKEN_CACHE_DB or the GUNDI_TOKEN_CACHE_URL override.",
+            type(e).__name__,
+            e,
+        )
+        return ""
+    return url
+
+
+# Shared OAuth token cache (gundi-client-v2 >= 3.7). Every GundiClient this
+# dispatcher builds (one per portal cache miss) shares one Keycloak token per
+# set of credentials, in process memory and in this Redis database, so the
+# dispatcher services stop minting a token per miss. DB 2 is the same
+# database the action runners use, so a runner and a dispatcher that share a
+# Redis and credentials share tokens. Set GUNDI_TOKEN_CACHE_URL="" to keep
+# tokens in-process only. The cache holds access and refresh tokens as
+# plaintext JSON; protect the database like the config cache (db 3).
+GUNDI_TOKEN_CACHE_URL = validated_token_cache_url(
+    env.str(
+        "GUNDI_TOKEN_CACHE_URL",
+        f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_TOKEN_CACHE_DB}",
+    )
+)
+# gundi-client-v2 reads its own settings module for the constructor default at
+# construction time, so installing the URL there covers every GundiClient()
+# in this process without touching the call sites.
+from gundi_client_v2 import settings as gundi_client_settings  # noqa: E402
+
+gundi_client_settings.GUNDI_TOKEN_CACHE_URL = GUNDI_TOKEN_CACHE_URL
+
 # N-seconds to cache portal responses for configuration objects.
 PORTAL_CONFIG_OBJECT_CACHE_TTL = env.int("PORTAL_CONFIG_OBJECT_CACHE_TTL", 60)
 DISPATCHED_OBSERVATIONS_CACHE_TTL = env.int(
