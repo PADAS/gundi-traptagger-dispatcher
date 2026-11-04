@@ -20,7 +20,7 @@ async def lifespan(app: FastAPI):
     # Startup Hook
     yield
     # Shutdown Hook
-    await utils.redis_client.close()
+    await utils.redis_client.aclose()
     await dispatchers.gcp_storage.close()
 
 

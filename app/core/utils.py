@@ -2,9 +2,11 @@
 import base64
 import json
 import logging
-import aioredis
 from enum import Enum
+import redis.asyncio as redis
 from redis import exceptions as redis_exceptions
+from redis.asyncio.retry import Retry
+from redis.backoff import ExponentialBackoff
 from . import settings, errors
 
 
@@ -15,10 +17,18 @@ def get_redis_db():
     logger.debug(
         f"Connecting to REDIS DB :{settings.REDIS_DB} at {settings.REDIS_HOST}:{settings.REDIS_PORT}"
     )
-    return aioredis.from_url(
+    return redis.from_url(
         f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}",
         encoding="utf-8",
         decode_responses=True,
+        # Check idle connections before reusing them, so a dropped one gets replaced
+        health_check_interval=settings.REDIS_HEALTH_CHECK_INTERVAL,
+        # Reconnect and retry commands that fail on connection errors
+        retry=Retry(ExponentialBackoff(), settings.REDIS_RETRY_ATTEMPTS),
+        retry_on_error=[
+            redis_exceptions.ConnectionError,
+            redis_exceptions.TimeoutError,
+        ],
     )
 
 
