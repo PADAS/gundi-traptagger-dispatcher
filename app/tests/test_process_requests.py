@@ -24,9 +24,10 @@ async def test_process_event_v2_successfully(
     # Mock external dependencies
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.utils.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
     mocker.patch("app.services.event_handlers._cache_db", mock_redis)
-    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
     async with respx.mock(
@@ -84,9 +85,10 @@ async def test_process_attachment_v2_successfully(
     # Mock external dependencies
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.utils.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
     mocker.patch("app.services.event_handlers._cache_db", mock_redis_with_cached_event)
-    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
     # Mock the TrapTagger API
@@ -175,9 +177,10 @@ async def test_process_attachment_v2_with_permanent_client_error_is_dead_lettere
     # Mock external dependencies
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.utils.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
     mocker.patch("app.services.event_handlers._cache_db", mock_redis_with_cached_event)
-    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
     async with respx.mock(
@@ -224,9 +227,10 @@ async def test_process_attachment_v2_with_server_error_is_retried(
     # Mock external dependencies
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.utils.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
     mocker.patch("app.services.event_handlers._cache_db", mock_redis_with_cached_event)
-    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
     async with respx.mock(
@@ -273,9 +277,10 @@ async def test_process_attachment_v2_young_buffer_miss_is_retried(
     # Mock external dependencies. The metadata cache is empty (mock_redis returns None)
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.utils.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
     mocker.patch("app.services.event_handlers._cache_db", mock_redis)
-    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
     from app.main import app
@@ -312,9 +317,10 @@ async def test_process_attachment_v2_expired_buffer_miss_is_dead_lettered(
     # Mock external dependencies. The metadata cache is empty (mock_redis returns None)
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.utils.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
     mocker.patch("app.services.event_handlers._cache_db", mock_redis)
-    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
     from app.main import app
@@ -350,12 +356,13 @@ async def test_process_attachment_v2_without_location_warns_and_dead_letters(
     # Mock external dependencies
     mocker.patch("app.core.gundi.GundiClient", mock_gundi_client_v2_class)
     mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.utils.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.core.system_events.pubsub", mock_pubsub_client)
     mocker.patch(
         "app.services.event_handlers._cache_db",
         mock_redis_with_cached_event_without_location,
     )
-    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
     mocker.patch("app.services.process_messages.pubsub", mock_pubsub_client)
     async with respx.mock(

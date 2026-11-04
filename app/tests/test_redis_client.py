@@ -18,3 +18,13 @@ def test_redis_client_retries_on_connection_errors():
     assert redis_exceptions.ConnectionError in connection.retry_on_error
     assert redis_exceptions.TimeoutError in connection.retry_on_error
     assert connection.retry._retries == settings.REDIS_RETRY_ATTEMPTS
+
+
+def test_rate_limiter_redis_client_does_not_replay_commands():
+    # INCR/DECR are not idempotent: replaying one after a dropped connection
+    # could count a request twice or release it twice
+    client = get_redis_db(retry_on_connection_errors=False)
+    connection = client.connection_pool.make_connection()
+
+    assert connection.retry._retries == 0
+    assert connection.health_check_interval == settings.REDIS_HEALTH_CHECK_INTERVAL

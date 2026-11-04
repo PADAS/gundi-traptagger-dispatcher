@@ -30,8 +30,9 @@ async def test_dispatch_image_successfully(
 
     # Mock external dependencies
     mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.utils.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.event_handlers.publish_event", mock_publish_event)
-    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
 
     # Mock TrapTagger API response
@@ -95,8 +96,9 @@ async def test_dispatch_image_on_errors(
 
     # Mock external dependencies
     mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.utils.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.event_handlers.publish_event", mock_publish_event)
-    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
 
     # Mock TrapTagger API response
@@ -150,8 +152,9 @@ async def test_dispatch_image_on_error_without_response(
 
     # Mock external dependencies
     mocker.patch("app.core.utils.redis_client", mock_redis)
+    mocker.patch("app.core.utils.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.event_handlers.publish_event", mock_publish_event)
-    mocker.patch("app.services.dispatchers.redis_client", mock_redis)
+    mocker.patch("app.services.dispatchers.rate_limiter_redis_client", mock_redis)
     mocker.patch("app.services.dispatchers.gcp_storage", mock_cloud_storage_client)
 
     async with respx.mock(
