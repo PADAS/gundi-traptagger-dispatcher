@@ -8,7 +8,11 @@ from app.core import settings
 from urllib.parse import urlparse
 from gundi_core import schemas
 from gcloud.aio.storage import Storage
-from app.core.utils import RateLimiterSemaphore, redis_client, find_config_for_action
+from app.core.utils import (
+    RateLimiterSemaphore,
+    rate_limiter_redis_client,
+    find_config_for_action,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -84,7 +88,7 @@ class TrapTaggerImageDispatcher:
 
         try:  # Send the image to TrapTagger
             async with RateLimiterSemaphore(
-                redis_client=redis_client, url=str(self.integration.base_url)
+                redis_client=rate_limiter_redis_client, url=str(self.integration.base_url)
             ):
                 image_metadata = related_event.dict()  # Cam ID, lat/lon, etc...
                 file_name = os.path.basename(file_path)

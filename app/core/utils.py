@@ -2,28 +2,49 @@
 import base64
 import json
 import logging
-import aioredis
 from enum import Enum
+import redis.asyncio as redis
 from redis import exceptions as redis_exceptions
+from redis.asyncio.retry import Retry
+from redis.backoff import ExponentialBackoff
 from . import settings, errors
 
 
 logger = logging.getLogger(__name__)
 
 
-def get_redis_db():
+def get_redis_db(retry_on_connection_errors=True):
+    """
+    retry_on_connection_errors: replay a command that fails on a connection error.
+    Turn it off for non-idempotent commands (e.g. INCR/DECR counters), where the
+    server may have applied the command before the connection dropped.
+    """
     logger.debug(
         f"Connecting to REDIS DB :{settings.REDIS_DB} at {settings.REDIS_HOST}:{settings.REDIS_PORT}"
     )
-    return aioredis.from_url(
+    retry_kwargs = {}
+    if retry_on_connection_errors:
+        retry_kwargs = {
+            "retry": Retry(ExponentialBackoff(), settings.REDIS_RETRY_ATTEMPTS),
+            "retry_on_error": [
+                redis_exceptions.ConnectionError,
+                redis_exceptions.TimeoutError,
+            ],
+        }
+    return redis.from_url(
         f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}",
         encoding="utf-8",
         decode_responses=True,
+        # Check idle connections before reusing them, so a dropped one gets replaced
+        health_check_interval=settings.REDIS_HEALTH_CHECK_INTERVAL,
+        **retry_kwargs,
     )
 
 
 _cache_ttl = settings.PORTAL_CONFIG_OBJECT_CACHE_TTL
 redis_client = get_redis_db()
+# The rate limiter's INCR/DECR must not be replayed after a dropped connection
+rate_limiter_redis_client = get_redis_db(retry_on_connection_errors=False)
 connect_timeout, read_timeout = settings.DEFAULT_REQUESTS_TIMEOUT
 
 

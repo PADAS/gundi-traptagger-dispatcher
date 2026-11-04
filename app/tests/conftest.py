@@ -27,6 +27,7 @@ def _mock_redis_cache(mocker, cached_value=None):
     mock_cache.__aenter__.return_value = mock_cache
     mock_cache.__aexit__.return_value = None
     mock_cache.close.return_value = async_return(None)
+    mock_cache.aclose.return_value = async_return(None)
     mock_cache.pipeline.return_value = mock_cache
     return mock_cache
 

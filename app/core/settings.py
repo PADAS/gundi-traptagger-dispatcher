@@ -43,6 +43,10 @@ PORTAL_INBOUND_INTEGRATIONS_ENDPOINT = (
 REDIS_HOST = env.str("REDIS_HOST", "localhost")
 REDIS_PORT = env.int("REDIS_PORT", 6379)
 REDIS_DB = env.int("REDIS_DB", 3)
+# Seconds a connection can stay idle before it is checked with a PING on next use
+REDIS_HEALTH_CHECK_INTERVAL = env.int("REDIS_HEALTH_CHECK_INTERVAL", 30)
+# Retries for a Redis command that fails on a connection error
+REDIS_RETRY_ATTEMPTS = env.int("REDIS_RETRY_ATTEMPTS", 3)
 
 # N-seconds to cache portal responses for configuration objects.
 PORTAL_CONFIG_OBJECT_CACHE_TTL = env.int("PORTAL_CONFIG_OBJECT_CACHE_TTL", 60)
